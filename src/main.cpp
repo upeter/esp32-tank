@@ -1,4 +1,6 @@
 #include <PS4Controller.h>
+#include <ESP32Servo.h>
+
 unsigned long lastTimeStamp = 0;
 int maxSpeed = 255;
 int minSpeed = maxSpeed * -1;
@@ -16,6 +18,8 @@ const int PWMFreq = 1000; /* 1 KHz */
 const int PWMResolution = 8;
 const int rightMotorPWMSpeedChannel = 4;
 const int leftMotorPWMSpeedChannel = 5;
+
+const int baseServoPin = 13;
 
 const int lightSensorPin = 36;
 const int ledPin1 = 13;
@@ -356,6 +360,7 @@ Flasher flasher1(ledPin1, 200, 200);
 Buzzer buzzer1(buzzerPin1, 300, 1400);
 MotorChaosMonkey *chaosMonkey;
 Sensor * sensor1;
+Servo * baseServo;
 
 volatile long hitMillis;
 
@@ -367,6 +372,12 @@ void notify()
       int rightMotorSpeed, leftMotorSpeed;
       int stickY, stickX;
       int rightMotorSpeedRaw, leftMotorSpeedRaw;
+      int baseX;
+      int baseServoPosition;
+
+       baseX = PS4.LStickX();
+       baseServoPosition = map(baseX, -127, 127, 0, 180); 
+       baseServo->write(baseServoPosition);
 
       if (PS4.Triangle())
       {
@@ -400,20 +411,7 @@ void notify()
       rightMotorSpeed = constrain(rightMotorSpeed, minSpeed, maxSpeed);
       leftMotorSpeed = constrain(leftMotorSpeed, minSpeed, maxSpeed);
 
-      // motorLeft->setMotorDirections(leftMotorSpeed);
-      // motorRight->setMotorDirections(rightMotorSpeed);
-      // motorLeft->rotateMotor(leftMotorSpeed);
-      // motorRight->rotateMotor(rightMotorSpeed);
 
-      // rotateMotor(rightMotorSpeed, leftMotorSpeed);
-      //  int remainingHitMillis = millis() - hitMillis;
-      //  if(remainingHitMillis < 600) {
-      //    motors->rotateMotor(maxSpeed, -maxSpeed);
-      //  } else if(remainingHitMillis < 600 && remainingHitMillis > 300) {
-      //    motors->rotateMotor(-maxSpeed, maxSpeed);
-      //  } else {
-      //    motors->rotateMotor(rightMotorSpeed, leftMotorSpeed);
-      //  }
       if (!chaosMonkey->isActive())
       {
         motors->rotateMotor(rightMotorSpeed, leftMotorSpeed);
@@ -450,6 +448,15 @@ void notify()
     chaosMonkey = new MotorChaosMonkey(motors);
     sensor1 = new Sensor("t1", lightSensorPin, 200, flasher1, buzzer1, chaosMonkey, 400);
     motors->setUpPinModes();
+    baseServo = new Servo();
+
+
+    ESP32PWM::allocateTimer(0);
+    ESP32PWM::allocateTimer(1);
+    ESP32PWM::allocateTimer(2);
+    ESP32PWM::allocateTimer(3);
+    baseServo->setPeriodHertz(50);    // standard 50 hz servo
+    baseServo->attach(baseServoPin, 500, 2400); // 
 
 
     Serial.println("Motors initialized");
