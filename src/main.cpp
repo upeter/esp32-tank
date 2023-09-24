@@ -1,5 +1,7 @@
 #include <PS4Controller.h>
 #include <ESP32Servo.h>
+#include <vector>
+#include <initializer_list>
 
 unsigned long lastTimeStamp = 0;
 int maxSpeed = 255;
@@ -14,16 +16,44 @@ int enableLeftMotor = 23;
 int leftMotorPin1 = 18;
 int leftMotorPin2 = 19;
 
+//PWM
 const int PWMFreq = 1000; /* 1 KHz */
 const int PWMResolution = 8;
 const int rightMotorPWMSpeedChannel = 4;
 const int leftMotorPWMSpeedChannel = 5;
+//expo
+const float expo = 0.5;
+const float nullFactor = 157.0;
+const int maxX = 35;
 
+
+//Servo
 const int baseServoPin = 13;
-
-const int lightSensorPin = 36;
+//Sensor
+const int sensitivity = 20;
+const int lightSensorPin1 = 36;
+const int lightSensorPin2 = 39;
+const int lightSensorPin3 = 34;
+//Lighter
+const int lighterPin1 = 5;
 const int ledPin1 = 13;
 const int buzzerPin1 = 12;
+
+volatile int trimX = 0;
+
+
+float withExpo(int x)
+{
+	if(x == 0) {
+		return 1.0;
+	} else {
+		x = abs(x);
+		float n = (float(x)) / nullFactor;
+		float y = expo * pow(n, 3) + ((1.0 - expo) * n);
+		return y;
+	}
+}
+
 
 class Motors
 {
@@ -168,6 +198,11 @@ public:
   {
     active = !active;
   }
+  
+  boolean isActive() {
+	return active;
+  }
+
   void Activate()
   {
     active = true;
@@ -201,6 +236,53 @@ public:
     {
       previousMillis = 0;
       digitalWrite(ledPin, LOW);
+    }
+  }
+};
+
+class Lighter
+{
+  long OnTime;    // milliseconds of on-time
+  Flasher flasher1;
+  unsigned long previousMillis; // will store last time LED was updated
+
+public:
+  Lighter() {}
+
+public:
+  Lighter(Flasher &flasher1_, long on)
+  {
+    OnTime = on;
+    previousMillis = 0;
+	flasher1 = flasher1_;
+  }
+
+
+  void Activate()
+  {
+	if(!flasher1.isActive()) {
+	 	previousMillis = millis();
+		flasher1.Activate();
+	}
+  }
+
+  void Deactivate()
+  {
+	flasher1.Deactivate();
+  }
+
+  void Update()
+  {
+    // check to see if it's time to change the state of the LED
+    unsigned long currentMillis = millis();
+    if (flasher1.isActive()) {
+	  flasher1.Update();
+      if (currentMillis - previousMillis >= OnTime){
+		Serial.println("deactivate flasher");
+		flasher1.Deactivate();
+		flasher1.Update();
+		previousMillis = 0;
+	  }
     }
   }
 };
@@ -316,7 +398,7 @@ public:
     else
     {
       int ldrStatus = analogRead(ldrPin);
-      Serial.println((String) "" + id + ": Sensitity: " + (sensitivity) + " ldr: " + ldrStatus);
+      //Serial.println((String) "" + id + ": Sensitity: " + (sensitivity) + " ldr: " + ldrStatus);
 
       // low ldr = hit
       if (ldrStatus < sensitivity)
@@ -325,7 +407,7 @@ public:
         flasher.Activate();
         buzzer.Activate();
         active = true;
-        Serial.print("Hit: ");
+        Serial.print((String)"" + id + " hit: ");
         Serial.println(hitCount);
         try
         {
@@ -336,7 +418,6 @@ public:
           Serial.print("Exception caught: ");
           Serial.println(e.what());
         }
-         Serial.print("Started Chaos: ");
       }
     }
     flasher.Update();
@@ -355,11 +436,51 @@ public:
   }
 };
 
+class Sensors
+{
+  private:
+  std::vector<Sensor *> sensorCollection;
+
+  public:
+  Sensors(std::initializer_list<Sensor*> sensors) : sensorCollection(sensors) {
+    }
+
+  void Update()
+  {
+	for (Sensor *sensor : sensorCollection)
+	{
+	  sensor->Update();
+	}
+  }
+
+  void incrementSensitivity(int inc)
+  {
+	for (Sensor *sensor : sensorCollection)
+	{
+	  sensor->incrementSensitivity(inc);
+	}
+  }
+  void decrementSensitivity(int dec)
+  {
+	for (Sensor *sensor : sensorCollection)
+	{
+	  sensor->decrementSensitivity(dec);
+	}
+  }
+};
+
 Motors *motors;
-Flasher flasher1(ledPin1, 200, 200);
+Flasher flasher1(ledPin1, 1000, 0);
+Flasher lighterFlasher1(lighterPin1, 100, 100);
+Lighter lighter1(lighterFlasher1, 2000);
 Buzzer buzzer1(buzzerPin1, 300, 1400);
 MotorChaosMonkey *chaosMonkey;
 Sensor * sensor1;
+Sensor * sensor2;
+Sensor * sensor3;
+
+Sensors * sensors;
+
 Servo * baseServo;
 
 volatile long hitMillis;
@@ -370,7 +491,7 @@ void notify()
     if (millis() - lastTimeStamp > 100)
     {
       int rightMotorSpeed, leftMotorSpeed;
-      int stickY, stickX;
+      int stickY, stickX, stickXWithExpo, stickXWithExpoFloat;
       int rightMotorSpeedRaw, leftMotorSpeedRaw;
       int baseX;
       int baseServoPosition;
@@ -384,21 +505,33 @@ void notify()
         chaosMonkey->Start();
       }
 
+      if (PS4.Cross())
+      {
+        lighter1.Activate();
+      }
+
       if (PS4.Circle())
       {
-        sensor1->incrementSensitivity(5);
+        //sensor1->incrementSensitivity(5);
+		trimX ++;
+
       }
       if (PS4.Square())
       {
-        sensor1->decrementSensitivity(5);
+        //sensor1->decrementSensitivity(5);
+		trimX --;
       }
 
       stickY = PS4.RStickY();
-      stickX = PS4.RStickX() / 3;
-      rightMotorSpeedRaw = constrain(stickY - stickX, -127, 127);
-      leftMotorSpeedRaw = constrain(stickY + stickX, -127, 127);
+      stickX = PS4.RStickX();
+      float stickXExpo = withExpo(stickX);
+      //stickX = (toggle ? (int)((float)stickX * stickXExpo) : stickX / 3) * -1;
+	  stickXWithExpo = constrain((int)((float(stickX) * stickXExpo) + trimX) * -1, maxX * -1, maxX);
 
-      rightMotorSpeed = map(rightMotorSpeedRaw, -127, 127, minSpeed, maxSpeed); // Left stick  - y axis - forward/backward left motor movement
+      rightMotorSpeedRaw = constrain(stickY - stickXWithExpo, -127, 127);
+      leftMotorSpeedRaw = constrain(stickY + stickXWithExpo, -127, 127);
+
+      rightMotorSpeed = map(rightMotorSpeedRaw , -127, 127, minSpeed, maxSpeed); // Left stick  - y axis - forward/backward left motor movement
       leftMotorSpeed = map(leftMotorSpeedRaw, -127, 127, minSpeed, maxSpeed);   // Right stick - y axis - forward/backward right motor movement
 
       // Only needed to print the message properly on serial monitor. Else we dont need it.
@@ -409,7 +542,11 @@ void notify()
       //   leftMotorSpeed = map( PS4.LStickY(), -127, 127, -220, 220);  //Right stick - y axis - forward/backward right motor movement
 
       rightMotorSpeed = constrain(rightMotorSpeed, minSpeed, maxSpeed);
+
       leftMotorSpeed = constrain(leftMotorSpeed, minSpeed, maxSpeed);
+
+    //   Serial.printf("StickY: %4d, StickX: %4d, StickXExpo: %f, StickXWithExpo: %d, trimX: %d ", stickY, stickX, stickXExpo, stickXWithExpo, trimX);
+	//   Serial.printf("right-raw: %d,  left-raw: %d, right: %d, left: %d \n", rightMotorSpeedRaw, leftMotorSpeedRaw, rightMotorSpeed, leftMotorSpeed);
 
 
       if (!chaosMonkey->isActive())
@@ -446,7 +583,10 @@ void notify()
 
     motors = new Motors();
     chaosMonkey = new MotorChaosMonkey(motors);
-    sensor1 = new Sensor("t1", lightSensorPin, 200, flasher1, buzzer1, chaosMonkey, 400);
+    sensor1 = new Sensor("t1", lightSensorPin1, sensitivity, flasher1, buzzer1, chaosMonkey, 400);
+	sensor2 = new Sensor("t2", lightSensorPin2, sensitivity, flasher1, buzzer1, chaosMonkey, 400);
+	sensor3 = new Sensor("t3", lightSensorPin3, sensitivity, flasher1, buzzer1, chaosMonkey, 400);
+	sensors = new Sensors({sensor1, sensor2, sensor3});
     motors->setUpPinModes();
     baseServo = new Servo();
 
@@ -471,8 +611,10 @@ void notify()
   {
     try
     {
-      sensor1->Update();
+      //sensor1->Update();
+	  sensors->Update();
       chaosMonkey->Update();
+	  lighter1.Update();
     }
     catch (const std::exception &e)
     {
