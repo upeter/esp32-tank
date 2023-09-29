@@ -261,6 +261,7 @@ public:
   void Activate()
   {
 	if(!flasher1.isActive()) {
+		Serial.println("Activate flasher");
 	 	previousMillis = millis();
 		flasher1.Activate();
 	}
@@ -278,7 +279,7 @@ public:
     if (flasher1.isActive()) {
 	  flasher1.Update();
       if (currentMillis - previousMillis >= OnTime){
-		Serial.println("deactivate flasher");
+		Serial.println("Deactivate flasher");
 		flasher1.Deactivate();
 		flasher1.Update();
 		previousMillis = 0;
@@ -499,28 +500,41 @@ void notify()
        baseX = PS4.LStickX();
        baseServoPosition = map(baseX, -127, 127, 0, 180); 
        baseServo->write(baseServoPosition);
-
+	//chaos monkey
       if (PS4.Triangle())
       {
         chaosMonkey->Start();
       }
-
-      if (PS4.Cross())
+		//shoot
+      if (PS4.R1() || PS4.L1())
       {
+		Serial.println("Shoot");
         lighter1.Activate();
       }
 
-      if (PS4.Circle())
-      {
-        //sensor1->incrementSensitivity(5);
-		trimX ++;
-
-      }
-      if (PS4.Square())
-      {
-        //sensor1->decrementSensitivity(5);
-		trimX --;
-      }
+	  //special functions
+	  if(PS4.L2()) {
+		//trim
+		if (PS4.Right())
+		{
+			trimX ++;
+			Serial.println("Trim++: " + (String)trimX);
+		}
+		if (PS4.Left())
+		{
+			trimX --;
+			Serial.println("Trim--: " + (String)trimX);
+		}
+		//change sensitivity
+		if (PS4.Up())
+		{
+			sensors->incrementSensitivity(1);
+		}
+		if (PS4.Down())
+		{
+			sensors->decrementSensitivity(1);
+		}
+	  }
 
       stickY = PS4.RStickY();
       stickX = PS4.RStickX();
@@ -611,7 +625,6 @@ void notify()
   {
     try
     {
-      //sensor1->Update();
 	  sensors->Update();
       chaosMonkey->Update();
 	  lighter1.Update();
